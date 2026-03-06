@@ -2,58 +2,63 @@
 
 namespace App\Http\Controllers;
 
- Illuminate\Http\Request;
 use App\Models\Document;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 
 class DocumentController extends Controller
 {
-    // Affiche tous les documents (pour le Dashboard de Sou)
-    public function index() 
-    {
-        // On récupère uniquement les docs de l'utilisateur connecté (Lien avec Saa)
-        $documents = Document::where('user_id', session('user_id'))->get();
-        return view('dashboard', compact('documents'));
-    }
-
-    // Enregistre le document (L'action principale de Ghita)
+    /**
+     * Store a newly created document in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
     public function store(Request $request)
     {
-        // 1. La Validation (Le Bouclier)
-        $request->validate([
+        $data = $request->validate([
+            'user_id' => 'required|exists:users,id',
             'titre' => 'required|string|max:255',
-            'fichier' => 'required|mimes:pdf,docx,png,jpg|max:2048', // Max 2Mo
+            'description' => 'nullable|string',
+            'chemin_fichier' => 'required|string',
+            'categorie' => 'required|string',
+            'password' => 'nullable|string|min:6',
         ]);
 
-        if ($request->hasFile('fichier')) {
-            // 2. L'Upload physique dans storage/app/public/documents
-            $path = $request->file('fichier')->store('documents', 'public');
-
-            // 3. Sauvegarde en base de données
-            $doc = new Document();
-            $doc->titre = $request->titre;
-            $doc->chemin_fichier = $path;
-            $doc->user_id = session('user_id'); // On lie à l'utilisateur actuel
-            $doc->save();
-
-            // 4. Message Flash pour Salah et Nouhaila
-            return redirect()->back()->with('success', 'Document ajouté avec succès !');
+        // si l'utilisateur fournit un mot de passe, on hash avant sauvegarde
+        if (!empty($data['password'])) {
+            $data['password'] = Hash::make($data['password']);
         }
+
+        Document::create($data);
+
+        return redirect()->back()->with('success', 'Document créé avec succès.');
     }
 
-    // Suppression (La propreté du serveur)
-    public function destroy($id)
+    /**
+     * Verify the given password against the stored hash.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Models\Document  $document
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function verifyPassword(Request $request, Document $document)
     {
-        $document = Document::findOrFail($id);
+        $request->validate([
+            'password' => 'required|string',
+        ]);
 
-        // Supprime le fichier physique du disque dur
-        if (Storage::disk('public')->exists($document->chemin_fichier)) {
-            Storage::disk('public')->delete($document->chemin_fichier);
+        // Si aucun mot de passe n'est défini, on laisse passer
+        if (!$document->password) {
+            return redirect()->back();
         }
 
-        // Supprime la ligne dans la base de données
-        $document->delete();
+        if (Hash::check($request->input('password'), $document->password)) {
+            // mot de passe correct, on peut par exemple afficher le document
+            return redirect()->route('documents.show', $document);
+        }
 
-        return redirect()->back()->with('error', 'Document supprimé.');
+        // mot de passe incorrect -> flash d'erreur
+        return redirect()->back()->with('error', 'Mot de passe incorrect.');
     }
-};
+}
